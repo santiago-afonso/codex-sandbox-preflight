@@ -49,6 +49,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 say() { printf '%s\n' "$*"; }
+suggest() { printf 'SUGGEST- %s\n' "$*"; }
 
 summarize_error() {
   local out="${1:-}"
@@ -175,6 +176,7 @@ if current_socket_out="$("${python_socket_check[@]}" 2>&1)"; then
 else
   if printf '%s' "$current_socket_out" | grep -q "PermissionError: \\[Errno 1\\] Operation not permitted"; then
     say "INFO- socket() syscall blocked (likely sandbox network disabled)"
+    suggest "If you need network in a sandbox, rerun with: codex sandbox linux --full-auto -c sandbox_workspace_write.network_access=true -- <cmd>"
   else
     say "WARN- socket() syscall failed: $(summarize_error "$current_socket_out")"
   fi
@@ -209,7 +211,11 @@ if [[ -r "$home_cfg" ]] && (command -v python3 >/dev/null 2>&1 || command -v uv 
       python3 - <<'PY' "$HOME"
 import os
 import sys
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    print("WARN tomllib missing (need Python 3.11+). Skipping config.toml parse.")
+    raise SystemExit(0)
 
 home = sys.argv[1]
 cfg_path = os.path.join(home, ".codex", "config.toml")
@@ -258,7 +264,11 @@ PY
       uv run python - <<'PY' "$HOME"
 import os
 import sys
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    print("WARN tomllib missing (need Python 3.11+). Skipping config.toml parse.")
+    raise SystemExit(0)
 
 home = sys.argv[1]
 cfg_path = os.path.join(home, ".codex", "config.toml")
@@ -306,6 +316,30 @@ PY
     fi
   )"
   printf '%s\n' "$cfg_report"
+  missing_roots=()
+  while IFS= read -r line; do
+    case "$line" in
+      "WARN missing_writable_root="*)
+        missing_roots+=("${line#WARN missing_writable_root=}")
+        ;;
+    esac
+  done <<<"$cfg_report"
+  for root in "${missing_roots[@]}"; do
+    case "$root" in
+      */.config/wbg-auth)
+        suggest "Add ${root} to sandbox_workspace_write.writable_roots so wbg-auth can write logs in the sandbox."
+        ;;
+      */.cache/uv)
+        suggest "Add ${root} to sandbox_workspace_write.writable_roots so uv/bd caches can write in the sandbox."
+        ;;
+      */tmp)
+        suggest "Add ${root} to sandbox_workspace_write.writable_roots for temp writes in the sandbox."
+        ;;
+      *)
+        suggest "Add ${root} to sandbox_workspace_write.writable_roots."
+        ;;
+    esac
+  done
 else
   say "WARN- skipped (need readable ~/.codex/config.toml + python3/uv)"
 fi
@@ -343,6 +377,7 @@ if sbx_socket_out="$(run_sandbox "${python_socket_check[@]}" 2>&1)"; then
 else
   if printf '%s' "$sbx_socket_out" | grep -q "PermissionError: \\[Errno 1\\] Operation not permitted"; then
     say "INFO- sandbox socket() syscall blocked (expected unless network enabled)"
+    suggest "Rerun with --with-network or add sandbox_workspace_write.network_access=true when you need network access."
   else
     say "WARN- sandbox socket() syscall failed: $(summarize_error "$sbx_socket_out")"
   fi
