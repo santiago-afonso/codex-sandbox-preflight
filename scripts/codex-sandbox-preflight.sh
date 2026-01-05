@@ -144,6 +144,16 @@ if command -v python3 >/dev/null 2>&1; then
 fi
 if command -v git >/dev/null 2>&1; then
   check_cmd "git --version" sh -c "git --version >/dev/null" || true
+
+  git_name="$(git config --get user.name 2>/dev/null || true)"
+  git_email="$(git config --get user.email 2>/dev/null || true)"
+  if [[ -z "${git_name:-}" || -z "${git_email:-}" ]]; then
+    say "WARN- git identity unset (user.name/user.email); git commit may fail"
+    suggest "Fix: git config --global user.name \"Your Name\""
+    suggest "Fix: git config --global user.email \"you@domain\""
+  else
+    say "OK  - git identity set (user.name/user.email)"
+  fi
 fi
 if command -v bd >/dev/null 2>&1; then
   check_cmd "bd version" sh -c "bd version >/dev/null" || true
