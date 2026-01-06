@@ -112,6 +112,30 @@ say
 
 critical_fail=0
 
+say "Network primitives (current process)"
+current_socket_out=""
+current_socket_ok=0
+if current_socket_out="$("${python_socket_check[@]}" 2>&1)"; then
+  say "OK  - socket() syscall"
+  current_socket_ok=1
+else
+  if printf '%s' "$current_socket_out" | grep -q "PermissionError: \\[Errno 1\\] Operation not permitted"; then
+    say "INFO- socket() syscall blocked (sandbox/outer sandbox likely denies networking syscalls)"
+    suggest "In Codex OS sandbox, enable network with: codex sandbox linux --full-auto -c sandbox_workspace_write.network_access=true -- <cmd>"
+    suggest "If sockets are blocked even outside `codex sandbox`, the outer harness/runner is network-restricted."
+  else
+    say "WARN- socket() syscall failed: $(summarize_error "$current_socket_out")"
+  fi
+fi
+
+if [[ "${current_socket_ok}" -eq 1 ]]; then
+  check_cmd "dns github.com" sh -c "getent hosts github.com >/dev/null" || true
+else
+  say "SKIP- dns github.com (socket blocked)"
+fi
+
+say
+
 check_cmd "codex in PATH" sh -c "command -v codex >/dev/null" || critical_fail=1
 check_cmd "codex --version" sh -c "codex --version >/dev/null" || critical_fail=1
 check_cmd "codex login status" sh -c "codex login status >/dev/null" || critical_fail=1
@@ -177,26 +201,6 @@ uv_cache_dir="${UV_CACHE_DIR:-$cache_home/uv}"
 check_cmd "write UV_CACHE_DIR (${uv_cache_dir})" sh -c 'd="${UV_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/uv}"; t="$d/.codex_preflight_write.$$"; mkdir -p "$d" >/dev/null 2>&1 || true; : >"$t" && rm -f -- "$t"' || true
 check_cmd "write ${cfg_home}/wbg-auth" sh -c 'd="${XDG_CONFIG_HOME:-$HOME/.config}/wbg-auth"; t="$d/.codex_preflight_write.$$"; mkdir -p "$d" >/dev/null 2>&1 || true; : >"$t" && rm -f -- "$t"' || true
 check_cmd "write ${cfg_home}/io.datasette.llm" sh -c 'd="${XDG_CONFIG_HOME:-$HOME/.config}/io.datasette.llm"; t="$d/.codex_preflight_write.$$"; mkdir -p "$d" >/dev/null 2>&1 || true; : >"$t" && rm -f -- "$t"' || true
-
-current_socket_out=""
-current_socket_ok=0
-if current_socket_out="$("${python_socket_check[@]}" 2>&1)"; then
-  say "OK  - socket() syscall"
-  current_socket_ok=1
-else
-  if printf '%s' "$current_socket_out" | grep -q "PermissionError: \\[Errno 1\\] Operation not permitted"; then
-    say "INFO- socket() syscall blocked (likely sandbox network disabled)"
-    suggest "If you need network in a sandbox, rerun with: codex sandbox linux --full-auto -c sandbox_workspace_write.network_access=true -- <cmd>"
-  else
-    say "WARN- socket() syscall failed: $(summarize_error "$current_socket_out")"
-  fi
-fi
-
-if [[ "${current_socket_ok}" -eq 1 ]]; then
-  check_cmd "dns github.com" sh -c "getent hosts github.com >/dev/null" || true
-else
-  say "SKIP- dns github.com (socket blocked)"
-fi
 
 home_cfg="${HOME}/.codex/config.toml"
 
@@ -340,7 +344,7 @@ PY
         suggest "Add ${root} to sandbox_workspace_write.writable_roots so wbg-auth can write logs in the sandbox."
         ;;
       */.cache/uv)
-        suggest "Add ${root} to sandbox_workspace_write.writable_roots so uv/bd caches can write in the sandbox."
+        suggest "Add ${root} to sandbox_workspace_write.writable_roots so uv caches can write in the sandbox."
         ;;
       */tmp)
         suggest "Add ${root} to sandbox_workspace_write.writable_roots for temp writes in the sandbox."
